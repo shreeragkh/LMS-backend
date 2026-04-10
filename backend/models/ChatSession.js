@@ -11,6 +11,6 @@ const chatSessionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-chatSessionSchema.index({ ownerUser: 1, role: 1 }, { unique: true });
+chatSessionSchema.index({ ownerUser: 1, role: 1 });
 
 module.exports = mongoose.model("ChatSession", chatSessionSchema);

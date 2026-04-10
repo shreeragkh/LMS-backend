@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../lib/api";
 
@@ -20,7 +20,8 @@ export default function RoleWorkspace({ role }) {
   const [quizzes, setQuizzes] = useState([]);
   const [sessionId, setSessionId] = useState("");
   const [chatInput, setChatInput] = useState("");
-  const [latestAnswer, setLatestAnswer] = useState("");
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatTyping, setChatTyping] = useState(false);
   const [reviewQuizId, setReviewQuizId] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -35,6 +36,16 @@ export default function RoleWorkspace({ role }) {
     materialIds: [],
     questions: [emptyQuestion()]
   });
+
+  const chatEndRef = useRef(null);
+
+  const scrollChatToBottom = () => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollChatToBottom();
+  }, [chatMessages, chatTyping]);
 
   const roleTitle = useMemo(() => {
     if (role === "faculty") return "Faculty";
@@ -265,18 +276,24 @@ export default function RoleWorkspace({ role }) {
     e.preventDefault();
     if (!chatInput.trim()) return;
 
+    const userMsg = chatInput.trim();
+    setChatMessages((prev) => [...prev, { role: "user", text: userMsg }]);
+    setChatInput("");
+    setChatTyping(true);
+
     try {
       setError("");
       const res = await api.post("/chat/message", {
         sessionId,
-        message: chatInput
+        message: userMsg
       });
 
-      console.log("Assistant response:", res.data.answer);
-      setLatestAnswer(res.data.answer || "");
-      setChatInput("");
+      setChatMessages((prev) => [...prev, { role: "ai", text: res.data.answer || "No response received." }]);
     } catch (err) {
-      setError(err.response?.data?.message || err.message || "Failed to send message");
+      const errMsg = err.response?.data?.message || err.message || "Failed to get a response.";
+      setChatMessages((prev) => [...prev, { role: "error", text: errMsg }]);
+    } finally {
+      setChatTyping(false);
     }
   };
 
@@ -534,16 +551,39 @@ export default function RoleWorkspace({ role }) {
         </section>
       )}
 
-      <section className="card">
-        <h2>Role-based chat</h2>
-        {latestAnswer && <p className="latest-answer">{latestAnswer}</p>}
-        <form className="chat-form" onSubmit={sendMessage}>
-          <textarea
+      <section className="card chat-card">
+        <h2>Chat with AI Assistant</h2>
+        <div className="chat-messages">
+          {chatMessages.length === 0 && !chatTyping && (
+            <div className="chat-empty">Ask a question to start chatting...</div>
+          )}
+          {chatMessages.map((msg, i) => (
+            <div
+              key={i}
+              className={`chat-bubble ${msg.role === "user" ? "chat-bubble-user" : msg.role === "error" ? "chat-bubble-error" : "chat-bubble-ai"}`}
+            >
+              <span className="chat-bubble-label">{msg.role === "user" ? "You" : msg.role === "error" ? "Error" : "AI Assistant"}</span>
+              <p>{msg.text}</p>
+            </div>
+          ))}
+          {chatTyping && (
+            <div className="chat-bubble chat-bubble-ai">
+              <span className="chat-bubble-label">AI Assistant</span>
+              <div className="chat-typing-indicator">
+                <span></span><span></span><span></span>
+              </div>
+            </div>
+          )}
+          <div ref={chatEndRef} />
+        </div>
+        <form className="chat-input-bar" onSubmit={sendMessage}>
+          <input
+            type="text"
             placeholder={`Ask the ${role} assistant...`}
             value={chatInput}
             onChange={(e) => setChatInput(e.target.value)}
           />
-          <button type="submit">Send</button>
+          <button type="submit" disabled={chatTyping || !chatInput.trim()}>Send</button>
         </form>
       </section>
     </div>

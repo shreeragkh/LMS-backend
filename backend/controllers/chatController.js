@@ -139,18 +139,13 @@ function buildFallbackAnswer({ role, question, relevantChunks }) {
 }
 
 async function getOrCreateSession(req) {
-  const session = await ChatSession.findOneAndUpdate(
-    { ownerUser: req.user.id, role: req.user.role },
-    {
-      $setOnInsert: {
-        ownerUser: req.user.id,
-        role: req.user.role,
-        title: `${req.user.role} session`
-      },
-      $set: { lastMessageAt: new Date() }
-    },
-    { new: true, upsert: true }
-  );
+  // Always create a fresh session so login starts with empty chat
+  const session = await ChatSession.create({
+    ownerUser: req.user.id,
+    role: req.user.role,
+    title: `${req.user.role} session`,
+    lastMessageAt: new Date()
+  });
 
   return session;
 }
@@ -178,6 +173,12 @@ exports.sendMessage = async (req, res) => {
     const { message, sessionId } = req.body;
     if (!message) {
       return res.status(400).json({ message: "message is required" });
+    }
+
+    // HARD REQUIREMENT: AI key must be configured
+    if (!hasUsableApiKey()) {
+      console.error("[CHAT] No usable OpenAI API key configured. Cannot process chat message.");
+      return res.status(503).json({ message: "AI service is not configured. Please contact the administrator to set up the API key." });
     }
 
     const session = sessionId
@@ -228,17 +229,11 @@ exports.sendMessage = async (req, res) => {
       }
     }
 
-    let answer = hasUsableApiKey()
-      ? await generateChatCompletion({
-          systemPrompt: `${systemPromptForRole(req.user.role)} Use only snippet evidence. If snippets do not support the answer, say you do not have enough evidence. Never return raw snippets unless quoting a short phrase.`,
-          userPrompt: `Question: ${message}\n\nEvidence snippets:\n${context}\n\nTask:\n1) Answer the question directly in 2-5 sentences.\n2) Keep the answer grounded only in evidence snippets.\n3) If evidence is insufficient, state that clearly.`,
-          temperature: 0.2
-        })
-      : buildFallbackAnswer({
-          role: req.user.role,
-          question: message,
-          relevantChunks
-        });
+    let answer = await generateChatCompletion({
+      systemPrompt: `${systemPromptForRole(req.user.role)} You are having a helpful conversation with the user. Use the provided evidence snippets to answer their question in a natural, conversational way. Synthesize the information - do NOT dump raw text or embeddings. If the evidence doesn't support an answer, say so clearly. Be concise but thorough.`,
+      userPrompt: `User's question: ${message}\n\nRelevant information from course materials:\n${context}\n\nInstructions:\n1) Answer the question in a natural, conversational tone as if chatting with the user.\n2) Synthesize and explain the information clearly - don't just copy-paste raw text.\n3) If the evidence is insufficient, clearly state that you don't have enough information.\n4) Keep the answer focused and helpful, typically 2-5 sentences.`,
+      temperature: 0.3
+    });
 
     answer = normalizeText(answer);
 
